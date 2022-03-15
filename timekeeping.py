@@ -9,73 +9,20 @@ from hanging_threads import start_monitoring
 from typing import Optional
 from ctypes import wintypes, windll, create_unicode_buffer
 import win32gui, win32api, win32process, psutil, threading
+import os
+
+#generalfunctions.py contains functions that aren't specific to this project
+from generalfunctions import *
 
 #enable for debugging hanging thread
 #start_monitoring(seconds_frozen=10, test_interval=100)
 
 """
-GENERAL FUNCTIONS
+OLD VERSION
+DISREGARD
+RUN MOKTIME.PY INSTEAD
 """
 
-def getForegroundWindowTitle() -> Optional[str]:
-    """
-    function to get the focused window title for autologging
-    from: https://stackoverflow.com/questions/10266281/obtain-active-window-using-python
-    """
-    hWnd = windll.user32.GetForegroundWindow()
-    length = windll.user32.GetWindowTextLengthW(hWnd)
-    buf = create_unicode_buffer(length + 1)
-    windll.user32.GetWindowTextW(hWnd, buf, length + 1)
-    
-    # 1-liner alternative: return buf.value if buf.value else None
-    if buf.value:
-        return buf.value
-    else:
-        return None
-
-def getIdleTime():
-    """
-    function the get current windows user idle time 
-    from: https://stackoverflow.com/questions/911856/detecting-idle-time-using-python
-    """
-    return (win32api.GetTickCount() - win32api.GetLastInputInfo()) / 1000.0
-
-
-def active_window_process_name():
-    """
-    function to get process name of active window
-    from: https://stackoverflow.com/questions/14394513/win32gui-get-the-current-active-application-name
-    """
-    try:
-        pid = win32process.GetWindowThreadProcessId(win32gui.GetForegroundWindow()) #This produces a list of PIDs active window relates to
-        return psutil.Process(pid[-1]).name() #pid[-1] is the most likely to survive last longer
-    except:
-        pass
-
-def roundTime(dt=None, date_delta=datetime.timedelta(seconds=1), to='average'):
-    """
-    Round a datetime object to a multiple of a timedelta
-    dt : datetime.datetime object, default now.
-    dateDelta : timedelta object, we round to a multiple of this, default 1 minute.
-    from:  http://stackoverflow.com/questions/3463930/how-to-round-the-minute-of-a-datetime-object-python
-    """
-    round_to = date_delta.total_seconds()
-    if dt is None:
-        dt = datetime.now()
-    seconds = (dt - dt.min).seconds
-
-    if seconds % round_to == 0 and dt.microseconds == 0:
-        rounding = (seconds + round_to / 2) // round_to * round_to
-    else:
-        if to == 'up':
-            # // is a floor division, not a comment on following line (like in javascript):
-            rounding = (seconds + dt.microseconds/1000000 + round_to) // round_to * round_to
-        elif to == 'down':
-            rounding = seconds // round_to * round_to
-        else:
-            rounding = (seconds + round_to / 2) // round_to * round_to
-
-    return dt + datetime.timedelta(0, rounding - seconds, - dt.microseconds)
 
 
 """
@@ -95,8 +42,6 @@ listpause=[]
 listplan=[]
 pause_time=0
 notifiedidle=True
-
-
 timeout = 60 #standard timeout time in seconds
 
 """
@@ -106,23 +51,16 @@ GUI INIT
 # ***** WIDGETS *****
 # create main window
 root = tk.Tk()
-root.geometry('485x320')
+root.geometry('400x300')
 root.title('Moktime')
 activity=tk.StringVar()
-activity.set("Current Activity: "+activity_text)
+activity.set(activity_text)
 autologger=tk.StringVar()
 autologger.set("Enable Autologger")
 startvar=tk.StringVar()
 startvar.set("Start new timer")
 timeoutvar=tk.IntVar()
 timeoutvar.set(timeout)
-
-"""
-NOTIFICATIONS FUNCTION
-"""
-def notify(msg):
-    toaster = ToastNotifier()
-    toaster.show_toast("Moktime", str(msg), icon_path='timer/mug.ico', duration=2, threaded=True)
 
 
 """
@@ -300,7 +238,7 @@ def startActivity():
 
     pause()
     activity_text=activity_entry.get()
-    activity.set("Current Activity: "+activity_text)
+    activity.set(activity_text)
     activity_start = datetime.datetime.now()
     listactivities.append("")
     liststart.append(activity_start)
@@ -351,13 +289,18 @@ def saveQuit():
     
     df = pd.DataFrame(list(zip(listplan, listactivities, listprocess, liststart, listtimes, listpause )),
                columns =['Activity', 'Window', 'Software', 'Start time', 'Time spent (s)', 'Time paused (s)'])
+    
+    output_path="output.csv"
     try:
-        df.to_csv("output.csv")
+        df.to_csv(output_path, mode='a', header=not os.path.exists(output_path), index=False)
     except PermissionError:
         timestring = datetime.datetime.now().strftime("%m%d%Y%H%M%S")
         print("Cannot save, output.csv is currently in use. Using alternative name output"+timestring+".csv")
-        df.to_csv("output"+datetime.datetime.now().strftime("%m%d%Y%H%M%S")+".csv")    
+        df.to_csv(output_path+timestring, mode='a', header=not os.path.exists(output_path+timestring),index=False)  
+    
     root.destroy()
+  
+
 
 """
 BUILD GUI
@@ -368,7 +311,7 @@ TODO: fix layout
 
 
 # label to display time
-stopwatch_label = tk.Label(root, text='00:00:00', font=('Arial', 30))
+stopwatch_label = tk.Label(root, text='00:00:00', font=('Arial', 50))
 #stopwatch_label.pack(fill='x')
 stopwatch_label.grid(column=0,row=0,columnspan=2)
 #activity display and logging
@@ -378,18 +321,23 @@ stopwatch_label.grid(column=0,row=0,columnspan=2)
 #activity_label.pack(fill='x')
 #activity_label.grid(column=0,row=1,columnspan=3)
 
+activity_label = tk.Label(text="Current Activity: ")
+activity_label.grid(column=0, row=1)
+
 activity_entry = tk.Entry(root, textvariable=activity)
 #activity_entry.pack(fill='x')
-activity_entry.grid(column=0,row=1,columnspan=2)
+activity_entry.grid(column=1,row=1)
 
 activity_button = tk.Button(text='Set title current plan', font=('Arial', 12), command=startActivity)
 #activity_button.pack(fill='x')
-activity_button.grid(column=0,row=2)
+activity_button.grid(column=2,row=1)
 
 log_button = tk.Button(text='Log activity time', font=('Arial', 12), command=logActivity)
-log_button.grid(column=1,row=2)
+log_button.grid(column=0,row=2)
 #log_button.pack(expand=True, fill='both',side='left')
 
+timeout_label = tk.Label(text="Timeout period (s):")
+timeout_label.grid(column=1, row=2)
 timeout_entry = tk.Entry(root,textvariable=timeoutvar)
 timeout_entry.grid(column=2,row=2)
 #timeout_entry.pack(expand=True, fill='both',side='left')

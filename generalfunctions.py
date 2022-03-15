@@ -8,8 +8,9 @@ import pandas as pd
 from hanging_threads import start_monitoring
 from typing import Optional
 from ctypes import wintypes, windll, create_unicode_buffer
-import win32gui, win32api, win32process, psutil, threading
-
+import win32gui, win32api, win32process, psutil, threading, win32com
+import uiautomation as auto
+import win32com.client
 
 def getForegroundWindowTitle() -> Optional[str]:
     """
@@ -78,4 +79,30 @@ def notify(msg):
     """
     toaster = ToastNotifier()
     toaster.show_toast("Moktime", str(msg), icon_path='timer/mug.ico', duration=2, threaded=True)
+
+
+
+def getCalendarEntries(day = 1):
+    '''
+    from https://stackoverflow.com/questions/60469945/add-appointments-from-one-outlook-calendar-to-another-using-win32com
+    '''
+    Outlook = win32com.client.Dispatch("Outlook.Application")
+    ns = Outlook.GetNamespace("MAPI")
+    appointments = ns.GetDefaultFolder(9).Items
+    appointments.Sort("[Start]")
+    appointments.IncludeRecurrences = "True"
+    begin = datetime.date.today()
+    end = begin + datetime.timedelta(days = day);
+    restriction = "[Start] >= '" + begin.strftime("%m/%d/%Y") + "' AND [End] <= '" +end.strftime("%m/%d/%Y") + "'"
+    restrictedItems = appointments.Restrict(restriction)
+    events={'Start':[],'End':[],'Organizer':[],'Subject':[],'Duration':[]}
+    for a in restrictedItems:
+        events['Start'].append(a.Start)
+        events['End'].append(a.End)
+        events['Organizer'].append(a.Organizer)
+        events['Subject'].append(a.Subject)
+        events['Duration'].append(a.Duration)
+    return events
+
+
 

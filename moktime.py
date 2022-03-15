@@ -15,6 +15,7 @@ import os
 import humanize
 from pathlib import Path
 import operator
+from pywinauto import Application
 
 OUTPUT_PATH = Path(__file__).parent
 ASSETS_PATH = OUTPUT_PATH / Path("./assets")
@@ -32,7 +33,6 @@ from generalfunctions import *
 """
 INIT
 """ 
-
 root = Tk()
 
 root.configure(bg = "#FFFFFF")
@@ -49,18 +49,30 @@ pausetime=0
 totaltime= datetime.timedelta(0)
 totalpausetime=datetime.timedelta(0)
 currenttasktime=datetime.timedelta(0)
+currentURL=""
+endTimeOutlookPlan=datetime.datetime(3500,1,1)
 
-timeout = 60 #standard timeout for autopause in seconds
+events=getCalendarEntries(3)
+timezone = events['Start'][0].tzinfo
+
+
+timeout = 120 #standard timeout for autopause in seconds
 interval = 1000 #updateinterval in ms
 
 listPlan = []
 listWindow = []
+listURL=[]
 listProcess	= []
 listStartTime = []
 listDuration = []
 listPause = []
 
 
+app = Application(backend='uia')
+app.connect(title_re=".*Chrome.*")
+element_name="Address and search bar"
+dlg = app.top_window()
+url = dlg.child_window(title=element_name, control_type="Edit").get_value()
 
 
 """
@@ -80,10 +92,17 @@ def update():
     global idletime
     global totaltime
     global totalpausetime
+    global endTimeOutlookPlan
+
+    now = datetime.datetime.now()
+
+    if now > endTimeOutlookPlan: #call log if current outlooktask is finished
+        endTimeOutlookPlan = datetime.datetime(3500,1,1)  #the future
+        log()
 
     if running:
         #calculate time passed
-        totaltime=(datetime.datetime.now()-timerstart)
+        totaltime=(now-timerstart)
 
         #check for idle
         idletime = getIdleTime()
@@ -98,7 +117,7 @@ def update():
     
     else:
         #paused, so keep running tally of paused time
-        totalpausetime=(datetime.datetime.now()-pausetime)
+        totalpausetime=(now-pausetime)
 
     #update displays and loop  
     displayUpdate()
@@ -107,30 +126,40 @@ def update():
 def log():
     global currenttasktime
     global previoustask
+    global endTimeOutlookPlan
 
-    if len(listDuration): #calculate duration previous entry
+    #check if there's a current outlook task, use that for plan
+    now = datetime.datetime.now(timezone)
+    for i in events['Start']:
+        if i < now:
+            if events['End'][events['Start'].index(i)] > now:
+                plan.set(events['Subject'][events['Start'].index(i)])
+                endTimeOutlookPlan=events['End'][events['Start'].index(i)]
+
+    if len(listDuration): #calculate duration previous entry, obv. skip if there is no previous
         listDuration[-1]=roundTime(datetime.datetime.now()-listStartTime[-1])
 
     #log current states and reset times
     listPlan.append(plan.get())
-    if len(listPlan) > 1 and listPlan[-1] != listPlan[-2]:
+    if len(listPlan) > 1 and listPlan[-1] != listPlan[-2]: #new plan? log previous one
         previoustask=listPlan[-2]
     
     if autologging:
         listWindow.append(getForegroundWindowTitle())
         listProcess.append(active_window_process_name())
+        listURL.append(dlg.child_window(title=element_name, control_type="Edit").get_value())
     else:
         listWindow.append("Not logged")
         listProcess.append("Not logged")
+        listURL.append("Not logged")
     
+
     listStartTime.append(datetime.datetime.now())
     listDuration.append(timedelta(0))
     listPause.append(timedelta(0))
     
-    #calculate time spent on current task
-    print(listPlan)
+    #calculate time spent on current task for display
     setlistplan=set(listPlan)
-    
     if len(setlistplan)>1:
         startindex=len(listPlan) - operator.indexOf(reversed(listPlan), previoustask)
         currenttasktime = sum(listDuration[startindex:],datetime.timedelta())
@@ -245,19 +274,19 @@ def saveQuit():
         pause()
         listDuration[-1]=roundTime(datetime.datetime.now()-listStartTime[-1])
 
-    df = pd.DataFrame(list(zip(listPlan, listWindow, listProcess, listStartTime, listDuration, listPause)),
-               columns =['Plan', 'Window', 'Software', 'Started', 'Duration', 'Paused'])
+    df = pd.DataFrame(list(zip(listPlan, listWindow, listURL, listProcess, listStartTime, listDuration, listPause)),
+               columns =['Plan', 'Window', 'URL', 'Software', 'Started', 'Duration', 'Paused'])
 
 
     output_path="output.csv"
     try:
         df.to_csv(output_path, mode='a', header=not os.path.exists(output_path), index=False)
-        buildStats(pd.read_csv(output_path))
+        #buildStats(pd.read_csv(output_path))
     except PermissionError:
         timestring = datetime.datetime.now().strftime("%m%d%Y%H%M%S")
         print("Cannot save, output.csv is currently in use. Using alternative name output"+timestring+".csv")
         df.to_csv(output_path+timestring, mode='a', header=not os.path.exists(output_path+timestring),index=False)  
-        buildStats(pd.read_csv(output_path+timestring))
+        #buildStats(pd.read_csv(output_path+timestring))
     
     root.destroy()
 
